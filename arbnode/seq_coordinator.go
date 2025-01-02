@@ -78,6 +78,9 @@ type SeqCoordinatorConfig struct {
 	MyUrl               string                     `koanf:"my-url"`
 	DeleteFinalizedMsgs bool                       `koanf:"delete-finalized-msgs"`
 	Signer              signature.SignVerifyConfig `koanf:"signer"`
+	// Sentinel configuration
+	WaitForSentinelMajority bool          `koanf:"wait-for-sentinel-majority"`
+	SentinelMajorityTimeout time.Duration `koanf:"sentinel-majority-timeout"`
 }
 
 func (c *SeqCoordinatorConfig) Url() string {
@@ -104,6 +107,10 @@ func SeqCoordinatorConfigAddOptions(prefix string, f *flag.FlagSet) {
 	f.String(prefix+".my-url", DefaultSeqCoordinatorConfig.MyUrl, "url for this sequencer if it is the chosen")
 	f.Bool(prefix+".delete-finalized-msgs", DefaultSeqCoordinatorConfig.DeleteFinalizedMsgs, "enable deleting of finalized messages from redis")
 	signature.SignVerifyConfigAddOptions(prefix+".signer", f)
+	f.Bool(prefix+".wait-for-sentinel-majority", DefaultSeqCoordinatorConfig.WaitForSentinelMajority,
+		"if true and running in sentinel mode, use WAIT to ensure writes reach majority of replicas")
+	f.Duration(prefix+".sentinel-majority-timeout", DefaultSeqCoordinatorConfig.SentinelMajorityTimeout,
+		"timeout for sentinel WAIT majority replication")
 }
 
 var DefaultSeqCoordinatorConfig = SeqCoordinatorConfig{
@@ -126,21 +133,23 @@ var DefaultSeqCoordinatorConfig = SeqCoordinatorConfig{
 }
 
 var TestSeqCoordinatorConfig = SeqCoordinatorConfig{
-	Enable:              false,
-	RedisUrl:            "",
-	NewRedisUrl:         "",
-	LockoutDuration:     time.Second * 2,
-	LockoutSpare:        time.Millisecond * 10,
-	SeqNumDuration:      time.Minute * 10,
-	UpdateInterval:      time.Millisecond * 10,
-	HandoffTimeout:      time.Millisecond * 200,
-	SafeShutdownDelay:   time.Millisecond * 100,
-	ReleaseRetries:      4,
-	RetryInterval:       time.Millisecond * 3,
-	MsgPerPoll:          20,
-	MyUrl:               redisutil.INVALID_URL,
-	DeleteFinalizedMsgs: true,
-	Signer:              signature.DefaultSignVerifyConfig,
+	Enable:                  false,
+	RedisUrl:                "",
+	NewRedisUrl:             "",
+	LockoutDuration:         time.Second * 2,
+	LockoutSpare:            time.Millisecond * 10,
+	SeqNumDuration:          time.Minute * 10,
+	UpdateInterval:          time.Millisecond * 10,
+	HandoffTimeout:          time.Millisecond * 200,
+	SafeShutdownDelay:       time.Millisecond * 100,
+	ReleaseRetries:          4,
+	RetryInterval:           time.Millisecond * 3,
+	MsgPerPoll:              20,
+	MyUrl:                   redisutil.INVALID_URL,
+	DeleteFinalizedMsgs:     true,
+	Signer:                  signature.DefaultSignVerifyConfig,
+	WaitForSentinelMajority: false,
+	SentinelMajorityTimeout: time.Second * 2,
 }
 
 func NewSeqCoordinator(
@@ -356,6 +365,36 @@ func (c *SeqCoordinator) acquireLockoutAndWriteMessage(ctx context.Context, msgC
 	if err != nil {
 		return err
 	}
+
+	if c.config.WaitForSentinelMajority {
+		log.Info("Waiting for sentinel majority replication")
+		quorum := redisutil.QuorumCountFromURL(c.config.RedisUrl)
+		log.Info("Quorum count", "quorum", quorum)
+		if quorum > 1 {
+			timeoutMs := int(c.config.SentinelMajorityTimeout.Milliseconds())
+			log.Info("Waiting for sentinel majority replication", "quorum", quorum, "timeoutMs", timeoutMs)
+			acked, waitErr := c.RedisCoordinator().Client.Do(ctx, "WAIT", quorum, timeoutMs).Int()
+			log.Info("WAIT result", "acked", acked, "err", waitErr)
+
+			if waitErr != nil || int(acked) < quorum {
+				// We didn't replicate to majority: remove the newly inserted keys, best-effort
+				if messageData != nil {
+					_ = c.RedisCoordinator().Client.Del(
+						ctx,
+						redisutil.MessageKeyFor(msgCountToWrite-1),
+						redisutil.MessageSigKeyFor(msgCountToWrite-1),
+					).Err()
+				}
+				_ = c.RedisCoordinator().Client.Del(ctx, redisutil.MSG_COUNT_KEY).Err()
+
+				return fmt.Errorf("WAIT got %d/%d acks (err=%v). Discarding message", acked, quorum, waitErr)
+			}
+		}
+	} else {
+		log.Info("Not waiting for sentinel majority replication")
+	}
+
+	// If we get here, the pipeline + WAIT was successful
 	if setWantsLockout {
 		c.reportedWantsLockout = true
 	}

@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -228,4 +229,79 @@ func setupConnParams(u *url.URL, o *redis.FailoverOptions) (*redis.FailoverOptio
 	}
 
 	return o, nil
+}
+
+// SentinelMeta holds sentinel detection and replica info.
+type SentinelMeta struct {
+	IsSentinel   bool
+	ReplicaCount int
+	QuorumSize   int
+}
+
+// Key = redis URL, Value = *SentinelMeta
+var sentinelMetaCache sync.Map
+
+// GetOrComputeSentinelMeta returns (and caches) whether the given redisUrl is sentinel,
+// plus the replica count, plus the precomputed quorum.  If we’ve computed it before,
+// returns the same pointer from the cache to avoid re-parsing.
+func GetOrComputeSentinelMeta(redisUrl string) *SentinelMeta {
+	if redisUrl == "" {
+		// Return empty sentinel info if no URL
+		return &SentinelMeta{}
+	}
+
+	// Check the sync.Map cache
+	if cachedVal, ok := sentinelMetaCache.Load(redisUrl); ok {
+		return cachedVal.(*SentinelMeta)
+	}
+
+	// Not in cache => compute now
+	meta := computeSentinelMeta(redisUrl)
+
+	// Store in cache
+	sentinelMetaCache.Store(redisUrl, meta)
+
+	return meta
+}
+
+func computeSentinelMeta(redisUrl string) *SentinelMeta {
+	u, err := url.Parse(redisUrl)
+	if err != nil {
+		// fallback if unparseable
+		return &SentinelMeta{}
+	}
+	meta := &SentinelMeta{}
+
+	// Mark isSentinel if scheme == "redis+sentinel"
+	if u.Scheme == "redis+sentinel" {
+		meta.IsSentinel = true
+	}
+
+	if meta.IsSentinel {
+		// Count how many sentinel hosts we have by splitting on commas
+		//
+		// For example, given:
+		//   redis+sentinel://host0:26379,host1:26379,host2:26379/mymaster/0
+		//   we want to parse out host0, host1, and host2
+		hostList := strings.Split(u.Host, ",")
+
+		// For a simple count, just use len(hostList):
+		numHosts := len(hostList)
+
+		meta.ReplicaCount = numHosts
+
+		// Quorum is then (replicas / 2) + 1 if more than 1
+		if meta.ReplicaCount > 1 {
+			meta.QuorumSize = (meta.ReplicaCount / 2) + 1
+		}
+	}
+
+	return meta
+}
+
+// QuorumCountFromURL returns the quorum size for the given redis URL. If the URL is not a sentinel URL,
+// returns 0.
+func QuorumCountFromURL(redisUrl string) int {
+	meta := GetOrComputeSentinelMeta(redisUrl)
+	return meta.QuorumSize
 }
