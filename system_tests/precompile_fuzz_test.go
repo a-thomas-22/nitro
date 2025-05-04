@@ -1,5 +1,5 @@
 // Copyright 2021-2022, Offchain Labs, Inc.
-// For license information, see https://github.com/nitro/blob/master/LICENSE
+// For license information, see https://github.com/OffchainLabs/nitro/blob/master/LICENSE.md
 
 package arbtest
 
@@ -42,9 +42,6 @@ func FuzzPrecompiles(f *testing.F) {
 
 		// Create an EVM
 		gp := core.GasPool(fuzzGas)
-		txContext := vm.TxContext{
-			GasPrice: common.Big1,
-		}
 		blockContext := vm.BlockContext{
 			CanTransfer: core.CanTransfer,
 			Transfer:    core.Transfer,
@@ -56,7 +53,7 @@ func FuzzPrecompiles(f *testing.F) {
 			GasLimit:    fuzzGas,
 			BaseFee:     common.Big1,
 		}
-		evm := vm.NewEVM(blockContext, txContext, sdb, chainConfig, vm.Config{})
+		evm := vm.NewEVM(blockContext, sdb, chainConfig, vm.Config{})
 
 		// Pick a precompile address based on the first byte of the input
 		var addr common.Address
