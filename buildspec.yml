@@ -1,0 +1,14 @@
+version: 0.2
+
+phases:
+  build:
+    commands:
+      - echo Build started on `date`
+      - echo Building the Docker image...
+      - docker build -t nitro:latest .
+      - echo Build completed on `date`
+
+artifacts:
+  files:
+    - artifacts/**/*
+  base-directory: "."
