@@ -27,7 +27,7 @@ COPY --from=brotli-library-builder /workspace/install/ /
 FROM node:18-bookworm-slim AS contracts-builder
 RUN apt-get update && \
     apt-get install -y git python3 make g++ curl software-properties-common gnupg
-# Install Rust 1.86.0
+# Install Rust 1.83.0
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain 1.83.0
 
 ENV PATH="/root/.cargo/bin:${PATH}"
