@@ -1,12 +1,7 @@
 FROM node:18-bookworm-slim AS contracts-builder
 RUN apt-get update && \
-    apt-get install -y git python3 make g++ curl software-properties-common gnupg
-# Install Rust 1.86.0
-RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain 1.86.0
-ENV PATH="/root/.cargo/bin:${PATH}"
-RUN rustup target add aarch64-unknown-linux-gnu
-# Install Foundry pin to 1.0.0
-RUN curl -L https://foundry.paradigm.xyz | bash && . ~/.bashrc && ~/.foundry/bin/foundryup -C 8692e926198056d0228c1e166b1b6c34a5bed66
+    apt-get install -y git python3 make g++ curl
+RUN curl -L https://foundry.paradigm.xyz | bash && . ~/.bashrc && ~/.foundry/bin/foundryup
 WORKDIR /workspace
 COPY contracts-legacy/package.json contracts-legacy/yarn.lock contracts-legacy/
 RUN cd contracts-legacy && yarn install
