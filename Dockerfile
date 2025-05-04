@@ -29,16 +29,11 @@ RUN apt-get update && \
     apt-get install -y git python3 make g++ curl software-properties-common gnupg
 # Install Rust 1.86.0
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain 1.86.0
-RUN if [ "$ARCH_TAG" = "arm64" ]; then \
-    rustup target add aarch64-unknown-linux-gnu; \
-    elif [ "$ARCH_TAG" = "amd64" ]; then \
-    rustup target add x86_64-unknown-linux-gnu; \
-    fi
 
 ENV PATH="/root/.cargo/bin:${PATH}"
 
 # Install Foundry pin to 1.0.0
-RUN curl -L https://foundry.paradigm.xyz | bash && . ~/.bashrc && ~/.foundry/bin/foundryup -C 8692e926198056d0228c1e166b1b6c34a5bed66
+RUN curl -L https://foundry.paradigm.xyz | bash && . ~/.bashrc && ~/.foundry/bin/foundryup -C e144b82070619b6e10485c38734b4d4d45aebe04
 WORKDIR /workspace
 COPY contracts-legacy/package.json contracts-legacy/yarn.lock contracts-legacy/
 RUN cd contracts-legacy && yarn install
